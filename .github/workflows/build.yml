@@ -1,7 +1,5 @@
 name: Build APK
-on:
-  push:
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
@@ -12,7 +10,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.5'
@@ -246,4 +243,5 @@ jobs:
                           try {
                               if (matchNode(node)) return node;
                               int n = node.getChildCount();
-                              for (int i = 0; i < n; 
+                              for (int i = 0; i < n; i++) {
+                                  Accessibi
