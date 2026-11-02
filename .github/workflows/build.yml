@@ -1,0 +1,249 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+      - name: Generate project
+        run: |
+          mkdir -p app/src/main/java/com/kane/skipad app/src/main/res/xml
+          cat > settings.gradle << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "SkipAd"
+          include ':app'
+          EOF
+          cat > build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application' version '8.1.4' apply false
+          }
+          EOF
+          cat > gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=true
+          EOF
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.kane.skipad'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.kane.skipad"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+
+          tasks.withType(JavaCompile) {
+              options.encoding = 'UTF-8'
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <application
+                  android:allowBackup="false"
+                  android:label="SkipAd"
+                  android:theme="@android:style/Theme.DeviceDefault.Dark.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".MainActivity$SkipService"
+                      android:exported="true"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_service_config" />
+                  </service>
+
+              </application>
+          </manifest>
+          EOF
+          cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+              android:canRetrieveWindowContent="true"
+              android:canPerformGestures="true"
+              android:notificationTimeout="100" />
+          EOF
+          cat > app/src/main/java/com/kane/skipad/MainActivity.java << 'EOF'
+          package com.kane.skipad;
+
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.GestureDescription;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.graphics.Path;
+          import android.graphics.Rect;
+          import android.os.Bundle;
+          import android.os.SystemClock;
+          import android.provider.Settings;
+          import android.text.TextUtils;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.accessibility.AccessibilityEvent;
+          import android.view.accessibility.AccessibilityNodeInfo;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import java.util.ArrayDeque;
+          import java.util.Deque;
+
+          public class MainActivity extends Activity {
+
+              private TextView tvStatus;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setGravity(Gravity.CENTER);
+                  root.setBackgroundColor(Color.parseColor("#FF121212"));
+                  root.setPadding(64, 64, 64, 64);
+
+                  tvStatus = new TextView(this);
+                  tvStatus.setTextColor(Color.WHITE);
+                  tvStatus.setTextSize(18f);
+                  tvStatus.setText("服务未开启");
+                  root.addView(tvStatus);
+
+                  Button btn = new Button(this);
+                  btn.setText("开启无障碍服务");
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT);
+                  lp.topMargin = 48;
+                  btn.setLayoutParams(lp);
+                  btn.setOnClickListener(new View.OnClickListener() {
+                      @Override
+                      public void onClick(View v) {
+                          try {
+                              startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                          } catch (Throwable t) {
+                              try {
+                                  startActivity(new Intent(Settings.ACTION_SETTINGS));
+                              } catch (Throwable ignored) {
+                              }
+                          }
+                      }
+                  });
+                  root.addView(btn);
+
+                  setContentView(root);
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  try {
+                      String service = getPackageName() + "/" + SkipService.class.getName();
+                      String enabled = Settings.Secure.getString(getContentResolver(),
+                              Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                      boolean on = !TextUtils.isEmpty(enabled) && enabled.contains(service);
+                      tvStatus.setText(on ? "服务已开启" : "服务未开启");
+                  } catch (Throwable t) {
+                      tvStatus.setText("状态读取失败");
+                  }
+              }
+
+              public static class SkipService extends AccessibilityService {
+
+                  private static final String[] TEXT_KEYS = {"跳过", "skip"};
+                  private static final String[] ID_KEYS = {
+                          "skip", "splash_skip", "tt_splash_skip_btn", "ad_skip", "btn_skip"
+                  };
+                  private static final long SCAN_INTERVAL = 250L;
+                  private static final int MAX_NODES = 2000;
+
+                  private long lastScan = 0L;
+
+                  @Override
+                  public void onAccessibilityEvent(AccessibilityEvent event) {
+                      if (event == null) return;
+                      try {
+                          int type = event.getEventType();
+                          if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                                  && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return;
+                          long now = SystemClock.uptimeMillis();
+                          if (now - lastScan < SCAN_INTERVAL) return;
+                          lastScan = now;
+
+                          AccessibilityNodeInfo root = getRootInActiveWindow();
+                          if (root == null) return;
+                          AccessibilityNodeInfo target = findTarget(root);
+                          if (target != null) clickNode(target);
+                      } catch (Throwable ignored) {
+                      }
+                  }
+
+                  private AccessibilityNodeInfo findTarget(AccessibilityNodeInfo root) {
+                      Deque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+                      queue.add(root);
+                      int count = 0;
+                      while (!queue.isEmpty() && count < MAX_NODES) {
+                          AccessibilityNodeInfo node = queue.poll();
+                          count++;
+                          if (node == null) continue;
+                          try {
+                              if (matchNode(node)) return node;
+                              int n = node.getChildCount();
+                              for (int i = 0; i < n; 
